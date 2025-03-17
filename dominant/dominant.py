@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from torch_geometric.nn import GCNConv
-
+from pygod.detector import CONAD
 
 class Encoder(nn.Module):
     def __init__(self, nfeat, nhid, drop_prob):

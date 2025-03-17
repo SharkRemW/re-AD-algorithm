@@ -1,6 +1,6 @@
 import argparse
 
-from conad import train_conad
+from train_conad import train_conad
 
 
 

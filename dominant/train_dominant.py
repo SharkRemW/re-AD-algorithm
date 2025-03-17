@@ -6,14 +6,14 @@ import torch
 from torch_geometric.utils import to_dense_adj
 from dominant import Dominant
 
-def loss_func(adj, A_hat, attrs, X_hat, alpha):
+def loss_func(s, s_, x, x_, alpha):
     # Attribute reconstruction loss
-    diff_attribute = torch.pow(X_hat - attrs, 2)
+    diff_attribute = torch.pow(x - x_, 2)
     attribute_reconstruction_errors = torch.sqrt(torch.sum(diff_attribute, 1) + 1e-9)
     attribute_cost = torch.mean(attribute_reconstruction_errors)
 
     # structure reconstruction loss
-    diff_structure = torch.pow(A_hat - adj, 2)
+    diff_structure = torch.pow(s - s_, 2)
     structure_reconstruction_errors = torch.sqrt(torch.sum(diff_structure, 1) + 1e-9)
     structure_cost = torch.mean(structure_reconstruction_errors)
 
