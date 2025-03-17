@@ -1,83 +1,161 @@
+from pygod.utils import load_data
+from sklearn.metrics import roc_auc_score
 import torch
 
+from torch_geometric.utils import to_dense_adj
 
-def train_conad(dataset, cuda=True, epoch1=100, epoch2=50, lr=1e-3, margin=0.5):
-    # data = load_data('inj_flickr') # in PyG format
-    # print(data)
-    # input attributed network G
-    adj, attrs, label, _ = load_anomaly_detection_dataset(dataset)
-    # create graph and attribute object, as anchor point
-    graph1 = dgl.from_scipy(scipy.sparse.coo_matrix(adj)).add_self_loop()
-    attrs1 = torch.FloatTensor(attrs)
-    num_attr = attrs.shape[1]
-    print("graph1: ", graph1)
-    print("attrs1: ", attrs1)
+from conad import Conad
+from pygod.detector import CONAD
 
-    # hidden dimension, output dimension
-    hidden_dim, out_dim = 128, 64
-    hidden_num = 2
-    model = GRL(num_attr, hidden_dim, out_dim, hidden_num)
+from copy import deepcopy
 
-    criterion = lambda z, z_hat, l: torch.square(z - z_hat) * (l==0) - l * torch.square(z - z_hat) + margin
-    
-    cuda_device = torch.device('cuda') if cuda else torch.device('cpu')
-    cpu_device = torch.device('cpu')
-    model = model.to(cuda_device)
-    
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+from torch_geometric.utils import dense_to_sparse
 
-    t = datetime.strftime(datetime.now(), '%y_%m_%d_%H_%M')
-    sw = SummaryWriter('logs/siamese_%s_%s' % (dataset, t))
+from tqdm import tqdm
+
+def graph_augmentation(adj, feat, rate=.1, clique_size=30, sourround=50, scale_factor=10):
+    adj_aug, feat_aug = deepcopy(adj), deepcopy(feat)
+    label_aug = torch.zeros(adj.shape[0])
+
+    assert(adj_aug.shape[0]==feat_aug.shape[0])
+
+    num_nodes = adj_aug.shape[0]
+    import torch
+from copy import deepcopy
+
+def graph_augmentation(adj, feat, rate=0.1, clique_size=30, surround=50, scale_factor=10):
+    # Deep copy the input adjacency and feature matrices
+    adj_aug, feat_aug = deepcopy(adj), deepcopy(feat)
+    label_aug = torch.zeros(adj.shape[0], dtype=torch.int32)  # Initialize labels
+
+    assert adj_aug.shape[0] == feat_aug.shape[0], "Adjacency and feature matrices must have the same number of nodes."
     
-    model.train()
+    num_nodes = adj_aug.shape[0]  # Number of nodes in the graph
+
+    for i in range(num_nodes):
+        prob = torch.rand(1).item()  # Random probability for anomaly injection
+        if prob > rate:
+            continue  # Skip if no anomaly is injected
+        
+        label_aug[i] = 1  # Mark node as anomalous
+        
+        one_fourth = torch.randint(0, 4, (1,)).item()  # Randomly choose one of four anomaly types
+        
+        if one_fourth == 0:
+            # Add clique: Connect the node to a random subset of other nodes
+            new_neighbors = torch.randperm(num_nodes)[:clique_size]  # Randomly select clique_size nodes
+            adj_aug[new_neighbors, i] = 1
+            adj_aug[i, new_neighbors] = 1
+
+        elif one_fourth == 1:
+            # Drop all connections: Remove all edges connected to the node
+            neighbors = torch.nonzero(adj_aug[i]).squeeze()  # Find neighbors of node i
+            if neighbors.numel() == 0:  # Skip if no neighbors exist
+                continue
+            adj_aug[i, neighbors] = 0
+            adj_aug[neighbors, i] = 0
+
+        elif one_fourth == 2:
+            # Deviated attributes: Replace node's feature with the most distant candidate
+            candidates = torch.randperm(num_nodes)[:surround]  # Randomly select surround nodes
+            max_dev, max_idx = 0, i
+            for c in candidates:
+                dev = torch.sum(torch.square(feat_aug[i] - feat_aug[c]))
+                if dev > max_dev:
+                    max_dev = dev
+                    max_idx = c
+            feat_aug[i] = feat_aug[max_idx]
+
+        else:
+            # Scale attributes: Multiply or divide the node's features by scale_factor
+            prob_scale = torch.rand(1).item()
+            if prob_scale > 0.5:
+                feat_aug[i] *= scale_factor
+            else:
+                feat_aug[i] /= scale_factor
+    edge_index_aug = dense_to_sparse(adj_aug)[0]
+    # print("edge_index_aug: ", edge_index_aug)
+    return feat_aug, edge_index_aug, label_aug
+
+def loss_func(s, s_, x, x_, alpha):
+    # Attribute reconstruction loss
+    diff_attribute = torch.pow(x - x_, 2)
+    attribute_reconstruction_errors = torch.sqrt(torch.sum(diff_attribute, 1) + 1e-9)
+    attribute_cost = torch.mean(attribute_reconstruction_errors)
+
+    # structure reconstruction loss
+    diff_structure = torch.pow(s - s_, 2)
+    structure_reconstruction_errors = torch.sqrt(torch.sum(diff_structure, 1) + 1e-9)
+    structure_cost = torch.mean(structure_reconstruction_errors)
+
+
+    cost =  alpha * attribute_reconstruction_errors + (1-alpha) * structure_reconstruction_errors
+
+    return cost, structure_cost, attribute_cost
+
+def train_conad(args):
+    data = load_data(args.dataset)
+    print("data: ", data)
+
+    # 生成邻接矩阵
+    data.s = to_dense_adj(data.edge_index)[0]
+
+    x = data.x
+    s = data.s
+    edge_index = data.edge_index
+
+    model = Conad(feat_size = x.shape[1], hidden_size = args.hidden_dim, drop_prob = args.dropout)
+
+    # criterion = torch.nn.TripletMarginLoss()
+    margin = 0.5
+    margin_loss_func = lambda z, z_hat, l: torch.square(z - z_hat) * (l==0) - l * torch.square(z - z_hat) + margin
     
-    # anomaly injection
-    adj_aug, attrs_aug, label_aug = make_anomalies(adj, attrs, rate=.2, clique_size=20, sourround=50)
-    graph2 = dgl.from_scipy(scipy.sparse.coo_matrix(adj_aug)).add_self_loop()
-    attrs2 = torch.FloatTensor(attrs_aug)
-    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    x = x.to(device)
+    s = s.to(device)
+    edge_index = edge_index.to(device)
+    model = model.to(device)
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+    # graph augmentation
+    x_aug, edge_index_aug, label_aug = graph_augmentation(s, x, rate=.2, clique_size=15)
+    label_aug = label_aug.unsqueeze(-1).float()
+    x_aug = x_aug.to(device)
+    edge_index_aug = edge_index_aug.to(device)
+    label_aug = label_aug.to(device)
+
+    epoch = args.epoch
     # train encoder with supervised contrastive learning
-    for i in tqdm(range(epoch1)):
-        # augmented labels introduced by injection
-        labels = torch.FloatTensor(label_aug).unsqueeze(-1)
-        if cuda:
-            graph1 = graph1.to(cuda_device)
-            attrs1 = attrs1.to(cuda_device)
-            graph2 = graph2.to(cuda_device)
-            attrs2 = attrs2.to(cuda_device)
-            labels = labels.to(cuda_device)
+    for i in tqdm(range(epoch)):
+        model.train()
         
-        # train siamese loss
-        orig = model.embed(graph1, attrs1)
-        aug = model.embed(graph2, attrs2)
-        margin_loss = criterion(orig, aug, labels)
+        z = model.embed(x, edge_index)
+        z_aug = model.embed(x_aug, edge_index_aug)
+        s_, x_ = model(x, edge_index)
+
+        margin_loss = margin_loss_func(z, z_aug, label_aug)
         margin_loss = margin_loss.mean()
-        sw.add_scalar('train/margin_loss', margin_loss, i)
-        optimizer.zero_grad()
-        margin_loss.backward()
-        optimizer.step()
-        
-        # train reconstruction
-        A_hat, X_hat = model(graph1, attrs1)
-        a = graph1.adjacency_matrix().to_dense()
-        recon_loss, struct_loss, feat_loss = loss_func(a.cuda() if cuda else a, A_hat, attrs1, X_hat, weight1=1, weight2=1, alpha=.7, mask=1)
+
+        recon_loss, struct_loss, feat_loss = loss_func(s, s_, x, x_, alpha=args.alpha)
         recon_loss = recon_loss.mean()
-        # loss = bce_loss + recon_loss
+
+        loss = 0.5 * margin_loss + 0.5 * recon_loss
+
         optimizer.zero_grad()
-        recon_loss.backward()
+        loss.backward()
         optimizer.step()
-        sw.add_scalar('train/rec_loss', recon_loss, i)
-        sw.add_scalar('train/struct_loss', struct_loss, i)
-        sw.add_scalar('train/feat_loss', feat_loss, i)
     
-    # evaluate
-    model.eval()
-    with torch.no_grad():
-        A_hat, X_hat = model(graph1, attrs1)
-        A_hat, X_hat = A_hat.cpu(), X_hat.cpu()
-        a = graph1.adjacency_matrix().to_dense().cpu()
-        recon_loss, struct_loss, feat_loss = loss_func(a, A_hat, attrs1.cpu(), X_hat, weight1=1, weight2=1, alpha=.3)
-        score = recon_loss.detach().numpy()
-        print('AUC: %.4f' % roc_auc_score(label, score))
-        for k in [50, 100, 200, 300]:
-            print('Precision@%d: %.4f' % (k, precision_at_k(label, score, k)))
+        # evaluate
+        if i % 10 == 0 or i == args.epoch - 1:
+            with torch.no_grad():
+                model.eval()
+
+                s_, x_ = model(x, edge_index)
+                recon_loss, struct_loss, feat_loss = loss_func(s, s_, x, x_, alpha=.7)
+
+                score = recon_loss.detach().cpu().numpy()
+
+                print('AUC: %.4f' % roc_auc_score(data.y.bool().numpy(), score))
+                # for k in [50, 100, 200, 300]:
+                #     print('Precision@%d: %.4f' % (k, precision_at_k(label, score, k)))

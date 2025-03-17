@@ -1,6 +1,6 @@
 import argparse
 
-from train_conad import train_conad
+from train_adagad import train_adagad
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -14,4 +14,4 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    train_conad(args)
+    train_adagad(args)
