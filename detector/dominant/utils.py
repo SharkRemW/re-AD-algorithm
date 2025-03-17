@@ -7,17 +7,31 @@ from pygod.utils import load_data
 
 
 def load_anomaly_detection_dataset(dataset, datadir='data'):
-    # data = load_data(dataset)
+    data = load_data("inj_cora")
+    print("data: ", data)
+    print("data.edge_index: ", data.edge_index)
+    print("data.x: ", data.x)
+    print("data.y: ", data.y)
 
-    data_mat = sio.loadmat(f'{datadir}/{dataset}.mat')
-    print("data_mat: ", data_mat)
+    feat = data.x
+    label = data.y
 
-    adj = data_mat['Network']
-    adj = (adj + sp.eye(adj.shape[0])).toarray()
-    feat = data_mat['Attributes'].toarray()
-    truth = data_mat['Label'].flatten()
+    num_nodes = feat.shape[0]
+
+    edge_index = data.edge_index
+    adj = torch.zeros((num_nodes, num_nodes), dtype=edge_index.dtype)
+    adj[edge_index[0], edge_index[1]] = 1
+
     
-    return adj, feat, truth, normalize_adj(adj)
+    # data_mat = sio.loadmat(f'{datadir}/{dataset}.mat')
+    # # print("data_mat: ", data_mat)
+
+    # adj = data_mat['Network']
+    # adj = (adj + sp.eye(adj.shape[0])).toarray()
+    # feat = data_mat['Attributes'].toarray()
+    # label = data_mat['Label'].flatten()
+    
+    return adj, feat, label, normalize_adj(adj.numpy())
 
 
 

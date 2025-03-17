@@ -32,9 +32,9 @@ def loss_func(adj, A_hat, attrs, X_hat, alpha):
 def train_dominant(args):
     adj, attrs, label, adj_norm = load_anomaly_detection_dataset(args.dataset)
 
-    adj = torch.FloatTensor(adj)
+    # adj = torch.FloatTensor(adj)
     adj_norm = torch.FloatTensor(adj_norm)
-    attrs = torch.FloatTensor(attrs)
+    # attrs = torch.FloatTensor(attrs)
 
 
     model = Dominant(feat_size = attrs.size(1), hidden_size = args.hidden_dim, dropout = args.dropout)
@@ -67,6 +67,8 @@ def train_dominant(args):
             A_hat, X_hat = model(attrs, adj_norm)
             loss, struct_loss, feat_loss = loss_func(adj, A_hat, attrs, X_hat, args.alpha)
             score = loss.detach().cpu().numpy()
+            print("score: ", score.shape, score)
+            print("label: ", label.shape, label)
             print("Epoch:", '%04d' % (epoch), 'Auc', roc_auc_score(label, score))
 
 
