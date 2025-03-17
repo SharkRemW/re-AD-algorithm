@@ -1,6 +1,6 @@
 import argparse
 
-from dominant import train_dominant
+from train_dominant import train_dominant
 
 
 
