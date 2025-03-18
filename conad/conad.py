@@ -58,11 +58,7 @@ class Conad(nn.Module):
 
     def embed(self, x, edge_index):
         return self.shared_encoder(x, edge_index)
-    
-    # def reconstruct(self, g, h):
-    #     struct_reconstructed = self.struct_decoder(h)
-    #     x_hat = self.attr_decoder(g, h).view(h.shape[0], -1)
-    #     return struct_reconstructed, x_hat
+
 
     def forward(self, x, edge_index):
         # encode
