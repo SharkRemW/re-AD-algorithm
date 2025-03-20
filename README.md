@@ -1,6 +1,9 @@
 # README
 
 本仓库是对三个图异常检测框架DOMINANT, CONAD, ADA-GAD基于Pytorch+PyG的重写版本。
+
+
+
 实验结果：
 ![结果](auc_comparison_extended_with_outline.png)
 注：后缀-s表示论文中的结果
